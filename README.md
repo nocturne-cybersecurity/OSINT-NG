@@ -1,6 +1,6 @@
 # OSINT-NG Framework
 
-![OSINT-NG Banner](src/Captura desde 2025-12-14 16-07-26.png)
+![OSINT-NG Banner](OSINT-NG/src/Captura desde 2025-12-14 16-07-26.png)
 
 **OSINT-NG** es un framework profesional de Inteligencia de Fuentes Abiertas (OSINT) diseñado para profesionales de la ciberseguridad, investigadores y equipos de seguridad. Proporciona herramientas poderosas para recopilar y analizar información de fuentes abiertas de manera eficiente.
 
