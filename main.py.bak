@@ -1,0 +1,918 @@
+# !/usr/bin/env python3
+"""
+OSINT-NG - Framework de OSINT modular
+Autor: Rodrigo Lopez
+Versión: 1.0.3
+"""
+
+import sqlite3
+import json
+import requests
+import argparse
+import sys
+import os
+import re
+import time
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+import csv
+
+# ============================================================================
+# CONFIGURACIÓN Y CONSTANTES
+# ============================================================================
+
+CONFIG = {
+    'database': 'osint_data.db',
+    'user_agent': 'OSINT-NG/1.0',
+    'timeout': 30,
+    'max_retries': 3
+}
+
+
+# ============================================================================
+# BASE DE DATOS
+# ============================================================================
+
+class Database:
+    """Manejo de base de datos SQLite"""
+
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or CONFIG['database']
+        self.conn = sqlite3.connect(self.db_path)
+        self.cursor = self.conn.cursor()
+        self._create_tables()
+
+    def _create_tables(self):
+        """Crea las tablas necesarias"""
+        tables = [
+            """CREATE TABLE IF NOT EXISTS domains (
+                domain TEXT PRIMARY KEY,
+                registrar TEXT,
+                creation_date TEXT,
+                expiration_date TEXT,
+                organization TEXT,
+                source TEXT,
+                discovered TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS emails (
+                email TEXT PRIMARY KEY,
+                domain TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                position TEXT,
+                source TEXT,
+                discovered TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (domain) REFERENCES domains(domain)
+            )""",
+            """CREATE TABLE IF NOT EXISTS persons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                username TEXT UNIQUE,
+                email TEXT,
+                phone TEXT,
+                company TEXT,
+                position TEXT,
+                source TEXT,
+                discovered TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS phones (
+                number TEXT PRIMARY KEY,
+                country TEXT,
+                carrier TEXT,
+                line_type TEXT,
+                valid BOOLEAN,
+                source TEXT,
+                discovered TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                module TEXT,
+                target TEXT,
+                data TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )"""
+        ]
+
+        for table in tables:
+            self.cursor.execute(table)
+        self.conn.commit()
+
+    def query(self, sql: str, params: tuple = None):
+        """Ejecuta una consulta SQL"""
+        try:
+            if params:
+                self.cursor.execute(sql, params)
+            else:
+                self.cursor.execute(sql)
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"[-] Error en consulta: {e}")
+            return []
+
+    def insert_domain(self, domain: str, registrar: str = None,
+                      creation_date: str = None, organization: str = None,
+                      source: str = "manual"):
+        """Inserta o actualiza un dominio"""
+        try:
+            self.cursor.execute("""
+                INSERT OR REPLACE INTO domains 
+                (domain, registrar, creation_date, organization, source) 
+                VALUES (?, ?, ?, ?, ?)
+            """, (domain, registrar, creation_date, organization, source))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"[-] Error insertando dominio: {e}")
+            return False
+
+    def insert_email(self, email: str, domain: str = None,
+                     first_name: str = None, last_name: str = None,
+                     source: str = "manual"):
+        """Inserta o actualiza un email"""
+        try:
+            self.cursor.execute("""
+                INSERT OR REPLACE INTO emails 
+                (email, domain, first_name, last_name, source) 
+                VALUES (?, ?, ?, ?, ?)
+            """, (email, domain, first_name, last_name, source))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"[-] Error insertando email: {e}")
+            return False
+
+    def insert_person(self, name: str = None, username: str = None,
+                      email: str = None, phone: str = None,
+                      company: str = None, source: str = "manual"):
+        """Inserta o actualiza una persona"""
+        try:
+            self.cursor.execute("""
+                INSERT OR REPLACE INTO persons 
+                (name, username, email, phone, company, source) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, username, email, phone, company, source))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"[-] Error insertando persona: {e}")
+            return False
+
+    def get_domains(self) -> List[tuple]:
+        """Obtiene todos los dominios"""
+        return self.query("SELECT domain, registrar, organization FROM domains")
+
+    def get_emails_by_domain(self, domain: str) -> List[tuple]:
+        """Obtiene emails por dominio"""
+        return self.query(
+            "SELECT email, first_name, last_name, source FROM emails WHERE domain = ?",
+            (domain,)
+        )
+
+    def close(self):
+        """Cierra la conexión a la base de datos"""
+        self.conn.close()
+
+
+# ============================================================================
+# MÓDULOS DE OSINT
+# ============================================================================
+
+class BaseModule:
+    """Clase base para todos los módulos"""
+
+    def __init__(self, db: Database):
+        self.db = db
+        self.name = "Base Module"
+        self.description = "Module description"
+        self.author = "OSINT-NG"
+        self.version = "1.0"
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': CONFIG['user_agent']
+        })
+
+    def run(self, target: str) -> Dict[str, Any]:
+        """Método principal a implementar por cada módulo"""
+        return {"status": "not_implemented", "data": {}}
+
+    def log_result(self, module: str, target: str, data: Dict):
+        """Registra resultados en la base de datos"""
+        try:
+            self.db.cursor.execute("""
+                INSERT INTO results (module, target, data) 
+                VALUES (?, ?, ?)
+            """, (module, target, json.dumps(data)))
+            self.db.conn.commit()
+        except Exception as e:
+            print(f"[-] Error registrando resultado: {e}")
+
+
+class WHOISLookup(BaseModule):
+    """Módulo para consultas WHOIS de dominios"""
+
+    def __init__(self, db: Database):
+        super().__init__(db)
+        self.name = "WHOIS Lookup"
+        self.description = "Consulta información WHOIS de dominios"
+
+    def run(self, domain: str) -> Dict:
+        print(f"[+] Consultando WHOIS para: {domain}")
+
+        # En un entorno real, usarías python-whois o una API
+        # Esta es una versión simulada para demostración
+        result = {
+            "domain": domain,
+            "registrar": "Example Registrar LLC",
+            "creation_date": "2020-01-15",
+            "expiration_date": "2025-01-15",
+            "organization": "Example Corp",
+            "status": "active"
+        }
+
+        # Guardar en base de datos
+        self.db.insert_domain(
+            domain=domain,
+            registrar=result["registrar"],
+            creation_date=result["creation_date"],
+            organization=result["organization"],
+            source="whois_lookup"
+        )
+
+        self.log_result("whois_lookup", domain, result)
+        return result
+
+
+class EmailHarvester(BaseModule):
+    """Módulo para buscar emails asociados a dominios"""
+
+    def __init__(self, db: Database):
+        super().__init__(db)
+        self.name = "Email Harvester"
+        self.description = "Busca correos electrónicos asociados a un dominio"
+
+    def run(self, domain: str) -> Dict:
+        print(f"[+] Buscando emails para: {domain}")
+
+        # Patrones comunes de emails
+        common_patterns = [
+            "admin", "info", "support", "contact", "sales",
+            "webmaster", "hostmaster", "postmaster"
+        ]
+
+        emails_found = []
+
+        # Generar emails basados en patrones comunes
+        for pattern in common_patterns:
+            email = f"{pattern}@{domain}"
+            emails_found.append({
+                "email": email,
+                "pattern": pattern,
+                "confidence": "medium"
+            })
+
+            # Guardar en base de datos
+            self.db.insert_email(
+                email=email,
+                domain=domain,
+                source="email_harvester"
+            )
+
+        # También buscar en la base de datos existente
+        existing_emails = self.db.get_emails_by_domain(domain)
+
+        result = {
+            "domain": domain,
+            "emails_generated": emails_found,
+            "emails_from_db": existing_emails,
+            "total": len(emails_found) + len(existing_emails)
+        }
+
+        self.log_result("email_harvester", domain, result)
+        return result
+
+
+class SubdomainEnumerator(BaseModule):
+    """Módulo para enumerar subdominios"""
+
+    def __init__(self, db: Database):
+        super().__init__(db)
+        self.name = "Subdomain Enumerator"
+        self.description = "Enumera subdominios de un dominio"
+
+    def run(self, domain: str) -> Dict:
+        print(f"[+] Enumerando subdominios para: {domain}")
+
+        # Lista común de subdominios
+        common_subs = [
+            "www", "mail", "webmail", "ftp", "blog",
+            "dev", "test", "staging", "api", "secure",
+            "admin", "portal", "cdn", "support", "shop"
+        ]
+
+        subdomains_found = []
+
+        # En un entorno real, aquí harías peticiones DNS o usarías APIs
+        # Esta es una versión de demostración
+        for sub in common_subs[:5]:  # Solo probamos 5 para demo
+            full_domain = f"{sub}.{domain}"
+
+            # Simular que algunos existen
+            if sub in ["www", "mail", "api"]:
+                subdomains_found.append({
+                    "subdomain": full_domain,
+                    "ip": "192.168.1.1",  # IP de ejemplo
+                    "status": "active"
+                })
+
+                # Guardar como dominio
+                self.db.insert_domain(
+                    domain=full_domain,
+                    source="subdomain_enum"
+                )
+
+        result = {
+            "domain": domain,
+            "subdomains": subdomains_found,
+            "total": len(subdomains_found)
+        }
+
+        self.log_result("subdomain_enum", domain, result)
+        return result
+
+
+class PersonSearch(BaseModule):
+    """Módulo para buscar información de personas"""
+
+    def __init__(self, db: Database):
+        super().__init__(db)
+        self.name = "Person Search"
+        self.description = "Busca información de personas por nombre o email"
+
+    def run(self, query: str) -> Dict:
+        print(f"[+] Buscando información para: {query}")
+
+        # Determinar si es email o nombre
+        if "@" in query:
+            # Es un email
+            result = self._search_by_email(query)
+        else:
+            # Es un nombre
+            result = self._search_by_name(query)
+
+        self.log_result("person_search", query, result)
+        return result
+
+    def _search_by_email(self, email: str) -> Dict:
+        """Busca información por email"""
+        # Extraer nombre del email (parte antes del @)
+        username = email.split("@")[0]
+
+        # Intentar extraer nombre y apellido
+        name_parts = username.split(".")
+        if len(name_parts) >= 2:
+            first_name = name_parts[0].capitalize()
+            last_name = name_parts[1].capitalize()
+            full_name = f"{first_name} {last_name}"
+        else:
+            first_name = username.capitalize()
+            last_name = ""
+            full_name = first_name
+
+        # Guardar en base de datos
+        self.db.insert_person(
+            name=full_name,
+            username=username,
+            email=email,
+            source="person_search"
+        )
+
+        return {
+            "email": email,
+            "name": full_name,
+            "username": username,
+            "source": "email_analysis",
+            "confidence": "medium"
+        }
+
+    def _search_by_name(self, name: str) -> Dict:
+        """Busca información por nombre"""
+        # En un entorno real, aquí buscarías en APIs o redes sociales
+        # Esta es una versión de demostración
+        name_lower = name.lower()
+        possible_emails = [
+            f"{name_lower.replace(' ', '.')}@example.com",
+            f"{name_lower.replace(' ', '_')}@company.com",
+            f"{name_lower.split(' ')[0]}@gmail.com"
+        ]
+
+        # Guardar en base de datos
+        self.db.insert_person(
+            name=name,
+            username=name_lower.replace(" ", "."),
+            source="person_search"
+        )
+
+        return {
+            "name": name,
+            "possible_emails": possible_emails,
+            "source": "name_search",
+            "confidence": "low"
+        }
+
+
+# ============================================================================
+# GESTOR DE MÓDULOS
+# ============================================================================
+
+class ModuleManager:
+    """Gestor de módulos OSINT"""
+
+    def __init__(self, db: Database):
+        self.db = db
+        self.modules = self._load_modules()
+
+    def _load_modules(self) -> Dict[str, BaseModule]:
+        """Carga todos los módulos disponibles"""
+        modules = {
+            "whois": WHOISLookup(self.db),
+            "emails": EmailHarvester(self.db),
+            "subdomains": SubdomainEnumerator(self.db),
+            "person": PersonSearch(self.db)
+        }
+        return modules
+
+    def list_modules(self) -> List[Dict]:
+        """Lista todos los módulos disponibles"""
+        module_list = []
+        for key, module in self.modules.items():
+            module_list.append({
+                "id": key,
+                "name": module.name,
+                "description": module.description,
+                "author": module.author,
+                "version": module.version
+            })
+        return module_list
+
+    def run_module(self, module_id: str, target: str) -> Dict:
+        """Ejecuta un módulo específico"""
+        if module_id not in self.modules:
+            return {"error": f"Módulo '{module_id}' no encontrado"}
+
+        module = self.modules[module_id]
+        print(f"[*] Ejecutando módulo: {module.name}")
+        print(f"[*] Objetivo: {target}")
+        print("-" * 50)
+
+        try:
+            result = module.run(target)
+            print(f"[+] Módulo completado exitosamente")
+            return result
+        except Exception as e:
+            error_msg = f"Error ejecutando módulo: {e}"
+            print(f"[-] {error_msg}")
+            return {"error": error_msg}
+
+    def run_all(self, target: str) -> Dict[str, Any]:
+        """Ejecuta todos los módulos para un objetivo"""
+        print(f"[*] Ejecutando todos los módulos para: {target}")
+        print("=" * 50)
+
+        results = {}
+        for module_id, module in self.modules.items():
+            print(f"\n[*] Ejecutando: {module.name}")
+            try:
+                result = module.run(target)
+                results[module_id] = result
+                print(f"[+] {module.name}: OK")
+            except Exception as e:
+                print(f"[-] {module.name}: ERROR - {e}")
+                results[module_id] = {"error": str(e)}
+
+        return results
+
+
+# ============================================================================
+# INTERFAZ DE LÍNEA DE COMANDOS
+# ============================================================================
+
+class OSINTngCLI:
+    """Interfaz de línea de comandos para OSINT-NG"""
+
+    def __init__(self):
+        self.db = Database()
+        self.manager = ModuleManager(self.db)
+        self.current_target = None
+
+    def print_banner(self):
+        """Muestra el banner del programa"""
+        banner = """
+╔═══════════════════════════════════════════════╗
+║                O S I N T - N G                ║
+║     Framework de Inteligencia de Fuentes      ║
+║               Abiertas Modular                ║
+╚═══════════════════════════════════════════════╝
+        """
+        print(banner)
+
+    def show_help(self):
+        """Muestra la ayuda"""
+        help_text = """
+COMANDOS DISPONIBLES:
+  help                   - Muestra esta ayuda
+  modules                - Lista módulos disponibles
+  use <módulo>           - Selecciona un módulo
+  set target <valor>     - Establece el objetivo
+  run                    - Ejecuta el módulo actual
+  run all                - Ejecuta todos los módulos
+  show domains           - Muestra dominios encontrados
+  show emails            - Muestra emails encontrados
+  show persons           - Muestra personas encontradas
+  export <formato>       - Exporta datos (json/csv)
+  clear                  - Limpia la pantalla
+  exit                   - Sale del programa
+
+EJEMPLOS:
+  use whois
+  set target example.com
+  run
+
+  use emails
+  set target company.com
+  run
+        """
+        print(help_text)
+
+    def list_modules(self):
+        """Lista los módulos disponibles"""
+        modules = self.manager.list_modules()
+        print("\n[+] MÓDULOS DISPONIBLES:")
+        print("-" * 60)
+        for i, module in enumerate(modules, 1):
+            print(f"{i:2}. {module['id']:12} - {module['name']}")
+            print(f"     {module['description']}")
+            print(f"     Autor: {module['author']} | v{module['version']}")
+            print()
+
+    def show_domains(self):
+        """Muestra dominios en la base de datos"""
+        domains = self.db.get_domains()
+        if not domains:
+            print("[-] No hay dominios en la base de datos")
+            return
+
+        print("\n[+] DOMINIOS ENCONTRADOS:")
+        print("-" * 80)
+        print(f"{'DOMINIO':30} {'REGISTRADOR':25} {'ORGANIZACIÓN':25}")
+        print("-" * 80)
+        for domain in domains:
+            print(f"{domain[0]:30} {domain[1] or 'N/A':25} {domain[2] or 'N/A':25}")
+        print(f"\n[+] Total: {len(domains)} dominios")
+
+    def show_emails(self, domain: str = None):
+        """Muestra emails en la base de datos"""
+        if domain:
+            emails = self.db.get_emails_by_domain(domain)
+            title = f"EMAILS PARA {domain}"
+        else:
+            emails = self.db.query("SELECT email, domain, first_name, source FROM emails")
+            title = "TODOS LOS EMAILS"
+
+        if not emails:
+            print(f"[-] No hay emails en la base de datos{' para ' + domain if domain else ''}")
+            return
+
+        print(f"\n[+] {title}:")
+        print("-" * 80)
+        print(f"{'EMAIL':35} {'DOMINIO':20} {'NOMBRE':20} {'FUENTE':15}")
+        print("-" * 80)
+        for email in emails:
+            name = f"{email[2] or ''} {email[3] or ''}".strip() if len(email) > 3 else email[2] or ""
+            print(f"{email[0]:35} {email[1] or 'N/A':20} {name:20} {email[-1]:15}")
+        print(f"\n[+] Total: {len(emails)} emails")
+
+    def export_data(self, format_type: str = "json"):
+        """Exporta los datos a un archivo"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if format_type.lower() == "json":
+            filename = f"osint_export_{timestamp}.json"
+            self._export_json(filename)
+        elif format_type.lower() == "csv":
+            filename = f"osint_export_{timestamp}.csv"
+            self._export_csv(filename)
+        else:
+            print(f"[-] Formato no soportado: {format_type}")
+            print("[+] Formatos disponibles: json, csv")
+
+    def _export_json(self, filename: str):
+        """Exporta datos a JSON"""
+        try:
+            # Recopilar todos los datos
+            data = {
+                "domains": [],
+                "emails": [],
+                "persons": [],
+                "export_date": datetime.now().isoformat()
+            }
+
+            # Dominios
+            domains = self.db.query("SELECT * FROM domains")
+            for domain in domains:
+                data["domains"].append({
+                    "domain": domain[0],
+                    "registrar": domain[1],
+                    "creation_date": domain[2],
+                    "expiration_date": domain[3],
+                    "organization": domain[4],
+                    "source": domain[5],
+                    "discovered": domain[6]
+                })
+
+            # Emails
+            emails = self.db.query("SELECT * FROM emails")
+            for email in emails:
+                data["emails"].append({
+                    "email": email[0],
+                    "domain": email[1],
+                    "first_name": email[2],
+                    "last_name": email[3],
+                    "position": email[4],
+                    "source": email[5],
+                    "discovered": email[6]
+                })
+
+            # Guardar archivo
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            print(f"[+] Datos exportados a: {filename}")
+            print(f"[+] Dominios: {len(data['domains'])}")
+            print(f"[+] Emails: {len(data['emails'])}")
+
+        except Exception as e:
+            print(f"[-] Error exportando datos: {e}")
+
+    def _export_csv(self, filename: str):
+        """Exporta datos a CSV"""
+        try:
+            # Para simplificar, solo exportamos emails
+            emails = self.db.query("SELECT email, domain, first_name, last_name, source FROM emails")
+
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['Email', 'Domain', 'First Name', 'Last Name', 'Source'])
+                for email in emails:
+                    writer.writerow(email)
+
+            print(f"[+] Emails exportados a: {filename}")
+            print(f"[+] Total registros: {len(emails)}")
+
+        except Exception as e:
+            print(f"[-] Error exportando CSV: {e}")
+
+    def interactive_mode(self):
+        """Modo interactivo con el usuario"""
+        self.print_banner()
+        print("[+] Base de datos inicializada")
+        print("[+] Escribe 'help' para ver los comandos\n")
+
+        current_module = None
+
+        while True:
+            try:
+                # Prompt personalizado
+                if current_module:
+                    prompt = f"osint-ng ({current_module}) > "
+                else:
+                    prompt = "osint-ng > "
+
+                command = input(prompt).strip()
+
+                if not command:
+                    continue
+
+                parts = command.split()
+                cmd = parts[0].lower()
+
+                if cmd == "exit" or cmd == "quit":
+                    print("[+] Saliendo de OSINT-NG...")
+                    self.db.close()
+                    break
+
+                elif cmd == "help":
+                    self.show_help()
+
+                elif cmd == "clear":
+                    os.system('cls' if os.name == 'nt' else 'clear')
+                    self.print_banner()
+
+                elif cmd == "modules":
+                    self.list_modules()
+
+                elif cmd == "use":
+                    if len(parts) < 2:
+                        print("[-] Uso: use <nombre_modulo>")
+                        print("[+] Módulos disponibles:")
+                        for module in self.manager.list_modules():
+                            print(f"    {module['id']}")
+                        continue
+
+                    module_id = parts[1]
+                    if module_id in self.manager.modules:
+                        current_module = module_id
+                        module = self.manager.modules[module_id]
+                        print(f"[+] Módulo seleccionado: {module.name}")
+                        print(f"[+] Descripción: {module.description}")
+                    else:
+                        print(f"[-] Módulo '{module_id}' no encontrado")
+
+                elif cmd == "set":
+                    if len(parts) < 3:
+                        print("[-] Uso: set <variable> <valor>")
+                        continue
+
+                    var_name = parts[1].lower()
+                    var_value = " ".join(parts[2:])
+
+                    if var_name == "target":
+                        self.current_target = var_value
+                        print(f"[+] Objetivo establecido: {var_value}")
+                    else:
+                        print(f"[-] Variable desconocida: {var_name}")
+
+                elif cmd == "run":
+                    if len(parts) > 1 and parts[1] == "all":
+                        if not self.current_target:
+                            print("[-] Primero establece un objetivo: set target <valor>")
+                            continue
+                        results = self.manager.run_all(self.current_target)
+                        print(f"\n[+] Todos los módulos completados para: {self.current_target}")
+                    else:
+                        if not current_module:
+                            print("[-] Primero selecciona un módulo: use <modulo>")
+                            continue
+                        if not self.current_target:
+                            print("[-] Primero establece un objetivo: set target <valor>")
+                            continue
+
+                        result = self.manager.run_module(current_module, self.current_target)
+                        print(f"\n[+] Resultados de {current_module}:")
+                        print(json.dumps(result, indent=2))
+
+                elif cmd == "show":
+                    if len(parts) < 2:
+                        print("[-] Uso: show <domains|emails|persons>")
+                        continue
+
+                    subcmd = parts[1].lower()
+                    if subcmd == "domains":
+                        self.show_domains()
+                    elif subcmd == "emails":
+                        domain = parts[2] if len(parts) > 2 else None
+                        self.show_emails(domain)
+                    elif subcmd == "persons":
+                        persons = self.db.query("SELECT name, username, email, company FROM persons")
+                        if persons:
+                            print("\n[+] PERSONAS ENCONTRADAS:")
+                            for person in persons:
+                                print(f"  • {person[0] or 'N/A'} (@{person[1] or 'N/A'})")
+                                if person[2]:
+                                    print(f"    Email: {person[2]}")
+                                if person[3]:
+                                    print(f"    Empresa: {person[3]}")
+                                print()
+                        else:
+                            print("[-] No hay personas en la base de datos")
+                    else:
+                        print(f"[-] Comando 'show' desconocido: {subcmd}")
+
+                elif cmd == "export":
+                    format_type = parts[1] if len(parts) > 1 else "json"
+                    self.export_data(format_type)
+
+                else:
+                    print(f"[-] Comando desconocido: {cmd}")
+                    print("[+] Escribe 'help' para ver los comandos disponibles")
+
+            except KeyboardInterrupt:
+                print("\n[!] Interrumpido por el usuario")
+                continue
+            except Exception as e:
+                print(f"[-] Error: {e}")
+
+
+# ============================================================================
+# MODO AUTOMÁTICO (NO INTERACTIVO)
+# ============================================================================
+
+def automatic_mode(target: str, modules: List[str] = None, export: str = None):
+    """Modo automático para ejecución por línea de comandos"""
+    print(f"[*] OSINT-NG - Modo automático")
+    print(f"[*] Objetivo: {target}")
+
+    db = Database()
+    manager = ModuleManager(db)
+
+    # Ejecutar módulos específicos o todos
+    if modules:
+        results = {}
+        for module_id in modules:
+            if module_id in manager.modules:
+                print(f"\n[*] Ejecutando: {module_id}")
+                result = manager.run_module(module_id, target)
+                results[module_id] = result
+            else:
+                print(f"[-] Módulo no encontrado: {module_id}")
+    else:
+        print(f"\n[*] Ejecutando todos los módulos")
+        results = manager.run_all(target)
+
+    # Mostrar resumen
+    print("\n" + "=" * 50)
+    print("[+] RESUMEN DE EJECUCIÓN:")
+
+    # Contar elementos encontrados
+    domains = db.get_domains()
+    emails = db.query("SELECT COUNT(*) FROM emails WHERE domain LIKE ?", (f"%{target}%",))
+    email_count = emails[0][0] if emails else 0
+
+    print(f"[+] Dominios encontrados: {len(domains)}")
+    print(f"[+] Emails encontrados: {email_count}")
+
+    # Exportar si se solicita
+    if export:
+        cli = OSINTngCLI()
+        cli.db = db
+        cli.export_data(export)
+
+    db.close()
+    return results
+
+
+# ============================================================================
+# FUNCIÓN PRINCIPAL
+# ============================================================================
+
+def main():
+    """Función principal del programa"""
+    parser = argparse.ArgumentParser(
+        description="OSINT-NG - Framework de Inteligencia de Fuentes Abiertas",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Ejemplos:
+  %(prog)s -i                     # Modo interactivo
+  %(prog)s -t example.com         # Escanear dominio
+  %(prog)s -t example.com -m whois,emails  # Módulos específicos
+  %(prog)s -t example.com --all --export json  # Todos los módulos y exportar
+        """
+    )
+
+    parser.add_argument("-i", "--interactive",
+                        action="store_true",
+                        help="Modo interactivo")
+
+    parser.add_argument("-t", "--target",
+                        help="Objetivo a analizar (dominio, email, nombre)")
+
+    parser.add_argument("-m", "--modules",
+                        help="Módulos a ejecutar (separados por coma)")
+
+    parser.add_argument("--all",
+                        action="store_true",
+                        help="Ejecutar todos los módulos")
+
+    parser.add_argument("--export",
+                        choices=["json", "csv"],
+                        help="Exportar resultados al formato especificado")
+
+    args = parser.parse_args()
+
+    # Validar argumentos
+    if not args.interactive and not args.target:
+        parser.print_help()
+        print("\n[-] Debes especificar un objetivo (-t) o usar modo interactivo (-i)")
+        sys.exit(1)
+
+    # Modo interactivo
+    if args.interactive:
+        cli = OSINTngCLI()
+        cli.interactive_mode()
+
+    # Modo automático
+    elif args.target:
+        modules = None
+        if args.modules:
+            modules = [m.strip() for m in args.modules.split(",")]
+        elif args.all:
+            # Todos los módulos
+            modules = None
+        else:
+            # Por defecto, solo whois y emails
+            modules = ["whois", "emails"]
+
+        automatic_mode(args.target, modules, args.export)
+
+
+if __name__ == "__main__":
+    main()
