@@ -270,7 +270,7 @@ osint-ng person "Nombre Apellido"
 - **Network Scanner**: Escanea puertos y servicios en red
 - **Social Media Lookup**: Busca perfiles en redes sociales
 
-## 📊 Visualización de Datos
+##  Visualización de Datos
 
 OSINT-NG incluye capacidades avanzadas de visualización de datos:
 
@@ -286,15 +286,15 @@ OSINT-NG incluye capacidades avanzadas de visualización de datos:
 - Opción de modo anónimo
 - No se almacena información sensible sin consentimiento
 
-## 📄 Licencia
+##  Licencia
 
 Este proyecto está bajo la licencia MIT. Ver el archivo [LICENSE](LICENSE) para más detalles.
 
-## 🤝 Contribuciones
+##  Contribuciones
 
 ¡Las contribuciones son bienvenidas! Por favor, lee nuestras [guías de contribución](CONTRIBUTING.md) para más información.
 
-## 📬 Contacto
+##  Contacto
 
 Para consultas o soporte, por favor abre un issue en el repositorio o contacta a [rodrigolopezpizarro271@gmail.com](mailto:rodrigolopezpizarro271@gmail.com).
 
