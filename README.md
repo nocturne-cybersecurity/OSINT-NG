@@ -26,7 +26,7 @@
 
 1. Clona el repositorio y accede al directorio:
    ```bash
-   git clone https://github.com/tu-usuario/OSINT-NG.git
+   git clone https://github.com/nocturne-cybersecurity/OSINT-NG.git
    cd OSINT-NG
    ```
 
@@ -49,7 +49,7 @@
 
 1. Clona el repositorio:
    ```bash
-   git clone https://github.com/tu-usuario/OSINT-NG.git
+   git clone https://nocturne-cybersecurity/OSINT-NG.git
    cd OSINT-NG
    ```
 
@@ -220,19 +220,19 @@ Si encuentras algún problema o tienes preguntas, por favor abre un issue en el 
 
 ---
 
-Desarrollado con ❤️ por el equipo de OSINT-NG incluye capacidades avanzadas de visualización de datos:
+Desarrollado por Rodrigo Lopez Pizarro incluye capacidades avanzadas de visualización de datos:
 
 - Gráficos de relaciones entre entidades
 - Mapas de redes sociales
 - Líneas de tiempo de actividad
 - Análisis de metadatos
 
-## 🖥️ Uso Básico
+## Uso Básico
 
 ### Ejecución Directa:
 ```bash
 # Ejecutar desde el directorio del proyecto
-./osint-ng.py [comando] [opciones]
+osint-ng [comando] [opciones]
 
 # Si creaste el enlace simbólico
 osint-ng [comando] [opciones]
@@ -296,10 +296,10 @@ Este proyecto está bajo la licencia MIT. Ver el archivo [LICENSE](LICENSE) para
 
 ## 📬 Contacto
 
-Para consultas o soporte, por favor abre un issue en el repositorio o contacta a [tu@email.com](mailto:tu@email.com).
+Para consultas o soporte, por favor abre un issue en el repositorio o contacta a [rodrigolopezpizarro271@gmail.com](mailto:rodrigolopezpizarro271@gmail.com).
 
 ---
 
 <div align="center">
-  Hecho con ❤️ por Rodrigo López | [@tuusuario](https://twitter.com/tuusuario)
+  Hecho por Rodrigo López | [@nocturne](rodrigolopezpizarro271@gmail.com)
 </div>
