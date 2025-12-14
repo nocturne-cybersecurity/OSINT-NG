@@ -67,9 +67,7 @@
 
 4. Para ejecutar el script, usa:
    ```bash
-   ./osint-ng.py [comandos]
-   # O si prefieres usar python
-   python osint-ng.py [comandos]
+   osint-ng
    ```
 
 ## Configuración de API Keys
