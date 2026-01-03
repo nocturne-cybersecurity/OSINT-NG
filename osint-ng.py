@@ -27,7 +27,6 @@ import configparser
 import pickle
 import platform
 
-# Importaciones de terceros
 try:
     import aiohttp
     import colorama
@@ -50,10 +49,8 @@ except ImportError as e:
     print(f"Dependencia faltante: {e}")
     sys.exit(1)
 
-# Inicializar colorama para Windows
 colorama.init()
 
-# Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -63,11 +60,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# CONFIGURACIÓN Y CONSTANTES
-# ============================================================================
 
 class Config:
     """Clase de configuración del framework"""
@@ -79,15 +71,12 @@ class Config:
         self.cache_dir = os.path.join(self.data_dir, "cache")
         self.plugins_dir = os.path.join(self.data_dir, "plugins")
 
-        # Crear directorios si no existen
         for directory in [self.config_dir, self.data_dir, self.cache_dir, self.plugins_dir]:
             os.makedirs(directory, exist_ok=True)
 
         self.config_file = os.path.join(self.config_dir, "config.ini")
         self.database_file = os.path.join(self.data_dir, "osint.db")
         self.api_keys_file = os.path.join(self.config_dir, "api_keys.json")
-
-        # Configuración por defecto
         self.default_config = {
             'general': {
                 'language': 'es',
@@ -142,13 +131,7 @@ class Config:
         self._save_config()
 
 
-# Instancia global de configuración
 CONFIG = Config()
-
-
-# ============================================================================
-# UTILIDADES
-# ============================================================================
 
 class ConsoleManager:
     """Gestor de la consola con Rich"""
@@ -179,10 +162,7 @@ class ConsoleManager:
 ╚══════════════════════════════════════════════════════════════════════════════╝
         """
         
-        # Crear un texto con estilo rojo
         text = Text(banner, style="red")
-        
-        # Mostrar el banner con un borde rojo
         self.console.print(Panel(
             text,
             border_style="red",
@@ -193,23 +173,18 @@ class ConsoleManager:
         self.console.print(f"[dim]Directorio de configuración: {CONFIG.config_dir}[/]\n")
 
     def print_success(self, message: str):
-        """Mostrar mensaje de éxito"""
         self.console.print(f"[green]✓[/] [bold]{message}[/]")
 
     def print_error(self, message: str):
-        """Mostrar mensaje de error"""
         self.console.print(f"[red]✗[/] [bold]{message}[/]")
 
     def print_warning(self, message: str):
-        """Mostrar mensaje de advertencia"""
         self.console.print(f"[yellow]⚠[/] [bold]{message}[/]")
 
     def print_info(self, message: str):
-        """Mostrar mensaje informativo"""
         self.console.print(f"[blue]ℹ[/] [bold]{message}[/]")
 
     def print_table(self, title: str, data: List[Dict], columns: List[str]):
-        """Mostrar tabla de datos"""
         table = Table(title=title, box=box.ROUNDED)
 
         for column in columns:
@@ -221,7 +196,6 @@ class ConsoleManager:
         self.console.print(table)
 
     def start_progress(self, description: str = "Procesando..."):
-        """Iniciar barra de progreso"""
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -247,13 +221,7 @@ class ConsoleManager:
             self.progress = None
 
 
-# Instancia global de consola
 console = ConsoleManager()
-
-
-# ============================================================================
-# BASE DE DATOS
-# ============================================================================
 
 class Database:
     """Gestor de base de datos SQLite"""
@@ -266,12 +234,10 @@ class Database:
         self._create_tables()
 
     def _connect(self):
-        """Conectar a la base de datos"""
         try:
             self.conn = sqlite3.connect(self.db_path, timeout=30)
             self.conn.row_factory = sqlite3.Row
             self.cursor = self.conn.cursor()
-            # Optimizaciones
             self.cursor.execute("PRAGMA journal_mode=WAL")
             self.cursor.execute("PRAGMA synchronous=NORMAL")
             self.cursor.execute("PRAGMA cache_size=10000")
@@ -281,9 +247,7 @@ class Database:
             sys.exit(1)
 
     def _create_tables(self):
-        """Crear tablas si no existen"""
         tables = [
-            # Dominios
             """
             CREATE TABLE IF NOT EXISTS domains (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -307,8 +271,6 @@ class Database:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
-
-            # Subdominios
             """
             CREATE TABLE IF NOT EXISTS subdomains (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -326,8 +288,6 @@ class Database:
                 UNIQUE(domain_id, subdomain)
             )
             """,
-
-            # Emails
             """
             CREATE TABLE IF NOT EXISTS emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -348,8 +308,6 @@ class Database:
                 discovered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
-
-            # Personas
             """
             CREATE TABLE IF NOT EXISTS persons (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -372,8 +330,6 @@ class Database:
                 FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE SET NULL
             )
             """,
-
-            # Resultados de escaneo
             """
             CREATE TABLE IF NOT EXISTS scan_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -386,8 +342,6 @@ class Database:
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
-
-            # API Cache
             """
             CREATE TABLE IF NOT EXISTS api_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -414,15 +368,12 @@ class Database:
 
         try:
             with self.conn:
-                # Crear tablas
                 for table_sql in tables:
                     self.cursor.execute(table_sql)
 
-                # Crear índices
                 for index_sql in indices:
                     self.cursor.execute(index_sql)
 
-                # Crear tabla de estadísticas si no existe
                 self.cursor.execute("""
                     CREATE TABLE IF NOT EXISTS stats (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -457,7 +408,6 @@ class Database:
             return None
 
     def insert_domain(self, domain_data: Dict) -> int:
-        """Insertar o actualizar dominio"""
         query = """
         INSERT OR REPLACE INTO domains (
             domain, registrar, creation_date, expiration_date, updated_date,
@@ -494,12 +444,6 @@ class Database:
         """Cerrar conexión a la base de datos"""
         if self.conn:
             self.conn.close()
-
-
-# ============================================================================
-# MÓDULOS BASE
-# ============================================================================
-
 class OSINTModule(ABC):
     """Clase base para todos los módulos OSINT"""
 
@@ -518,7 +462,6 @@ class OSINTModule(ABC):
 
     @abstractmethod
     def run(self, target: str) -> Dict:
-        """Método principal que debe implementar cada módulo"""
         pass
 
     def validate_target(self, target: str) -> bool:
@@ -567,11 +510,6 @@ class OSINTModule(ABC):
             (api_name, query, json.dumps(data), expires_at)
         )
 
-
-# ============================================================================
-# MÓDULOS IMPLEMENTADOS
-# ============================================================================
-
 class WhoisModule(OSINTModule):
     """Módulo para consultas WHOIS"""
 
@@ -588,10 +526,9 @@ class WhoisModule(OSINTModule):
         console.print_info(f"Consultando WHOIS para: {domain}")
 
         try:
-            # Consultar WHOIS
+
             w = whois.whois(domain)
 
-            # Procesar datos
             domain_data = {
                 'domain': domain,
                 'registrar': w.registrar,
@@ -612,7 +549,6 @@ class WhoisModule(OSINTModule):
                 'dnssec': w.dnssec if hasattr(w, 'dnssec') else None
             }
 
-            # Guardar en base de datos
             domain_id = self.db.insert_domain(domain_data)
 
             self.execution_time = time.time() - start_time
@@ -635,7 +571,6 @@ class WhoisModule(OSINTModule):
 
 
 class DNSModule(OSINTModule):
-    """Módulo para consultas DNS"""
 
     def __init__(self):
         super().__init__("dns", "Consulta registros DNS", "2.0.0")
@@ -655,7 +590,6 @@ class DNSModule(OSINTModule):
         results = {}
 
         try:
-            # Consultar diferentes tipos de registros DNS
             record_types = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'SOA', 'CNAME', 'SRV']
 
             for record_type in record_types:
@@ -668,7 +602,6 @@ class DNSModule(OSINTModule):
                     console.print_warning(f"Error consultando {record_type} para {domain}: {e}")
                     results[record_type] = []
 
-            # Consulta especial para SPF, DMARC, DKIM
             try:
                 txt_records = self.resolver.resolve(domain, 'TXT')
                 for record in txt_records:
@@ -682,7 +615,6 @@ class DNSModule(OSINTModule):
 
             self.execution_time = time.time() - start_time
 
-            # Guardar resultados
             dns_data = {
                 'domain': domain,
                 'records': results,
@@ -747,7 +679,6 @@ class SubdomainModule(OSINTModule):
         progress_task = None
 
         try:
-            # Obtener ID del dominio principal
             domain_result = self.db.execute(
                 "SELECT id FROM domains WHERE domain = ?",
                 (domain,),
@@ -763,12 +694,10 @@ class SubdomainModule(OSINTModule):
                 subdomain = f"{sub}.{domain}"
 
                 try:
-                    # Intentar resolver
                     answers = dns.resolver.resolve(subdomain, 'A')
                     ips = [str(rdata) for rdata in answers]
 
                     if ips:
-                        # Intentar HTTP
                         try:
                             response = self.session.get(f"http://{subdomain}", timeout=5)
                             status_code = response.status_code
@@ -789,7 +718,6 @@ class SubdomainModule(OSINTModule):
                             'discovered_date': datetime.now().isoformat()
                         }
 
-                        # Guardar en base de datos
                         if domain_id:
                             self.db.execute(
                                 """
@@ -804,17 +732,12 @@ class SubdomainModule(OSINTModule):
                         console.print_info(f"Encontrado: {subdomain} -> {ips[0]}")
 
                 except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-                    # Subdominio no existe
                     pass
                 except Exception as e:
-                    # Otro error
                     console.print_warning(f"Error en {subdomain}: {e}")
-
-                # Actualizar progreso
                 if progress_task:
                     console.update_progress(progress_task, advance=100 / len(self.wordlist))
 
-            # También consultar API de VirusTotal si hay clave
             vt_key = CONFIG.get('api', 'virustotal_key')
             if vt_key:
                 vt_subdomains = self._query_virustotal(domain, vt_key)
@@ -880,8 +803,6 @@ class SubdomainModule(OSINTModule):
 
 
 class EmailModule(OSINTModule):
-    """Módulo para análisis de correos electrónicos"""
-
     def __init__(self):
         super().__init__("email", "Análisis de correos electrónicos", "2.0.0")
 
@@ -902,29 +823,23 @@ class EmailModule(OSINTModule):
         }
 
         try:
-            # 1. Verificar formato
+
             analysis_results['checks']['format'] = self._check_email_format(email)
 
-            # 2. Verificar dominio
             analysis_results['checks']['domain'] = self._check_domain(email.split('@')[1])
 
-            # 3. Verificar si es desechable
             analysis_results['checks']['disposable'] = self._check_disposable(email)
 
-            # 4. Consultar Have I Been Pwned si hay clave
             hibp_key = CONFIG.get('api', 'haveibeenpwned_key')
             if hibp_key:
                 analysis_results['checks']['breaches'] = self._check_hibp(email, hibp_key)
 
-            # 5. Consultar Hunter.io si hay clave
             hunter_key = CONFIG.get('api', 'hunterio_key')
             if hunter_key:
                 analysis_results['checks']['hunter'] = self._check_hunter(email, hunter_key)
 
-            # 6. Buscar en redes sociales
             analysis_results['checks']['social'] = self._search_social(email)
 
-            # Guardar en base de datos
             self._save_email_to_db(email, analysis_results)
 
             self.execution_time = time.time() - start_time
@@ -963,7 +878,6 @@ class EmailModule(OSINTModule):
     def _check_domain(self, domain: str) -> Dict:
         """Verificar dominio del email"""
         try:
-            # Intentar resolver MX records
             mx_records = dns.resolver.resolve(domain, 'MX')
             mx_servers = [str(rdata.exchange) for rdata in mx_records]
 
@@ -976,7 +890,6 @@ class EmailModule(OSINTModule):
             return {'has_mx': False, 'mx_servers': []}
 
     def _check_disposable(self, email: str) -> Dict:
-        """Verificar si el email es desechable"""
         disposable_domains = [
             'tempmail.com', 'mailinator.com', 'guerrillamail.com',
             '10minutemail.com', 'throwawaymail.com', 'temp-mail.org'
@@ -1003,7 +916,7 @@ class EmailModule(OSINTModule):
                 return {
                     'breached': True,
                     'breach_count': len(breaches),
-                    'breaches': breaches[:5]  # Primeros 5
+                    'breaches': breaches[:5]
                 }
             elif response.status_code == 404:
                 return {'breached': False, 'breach_count': 0}
@@ -1014,7 +927,6 @@ class EmailModule(OSINTModule):
             return {'error': str(e)}
 
     def _check_hunter(self, email: str, api_key: str) -> Dict:
-        """Consultar Hunter.io"""
         try:
             url = f"https://api.hunter.io/v2/email-verifier"
             params = {'email': email, 'api_key': api_key}
@@ -1136,7 +1048,6 @@ class SocialModule(OSINTModule):
             if progress_task:
                 console.stop_progress()
 
-            # Contar plataformas encontradas
             found_count = sum(1 for p in results['platforms'].values() if p['exists'])
             results['summary'] = {
                 'total_checked': len(platforms),
@@ -1144,7 +1055,6 @@ class SocialModule(OSINTModule):
                 'not_found': len(platforms) - found_count
             }
 
-            # Guardar en base de datos si se encontraron perfiles
             if found_count > 0:
                 self._save_to_database(username, results)
 
@@ -1170,12 +1080,10 @@ class SocialModule(OSINTModule):
         try:
             response = self.session.get(url, timeout=10, allow_redirects=True)
 
-            # Verificar códigos de estado
             if response.status_code == 200:
-                # Verificar que no sea página genérica
+
                 page_content = response.text.lower()
 
-                # Patrones que indican que el perfil no existe
                 not_found_patterns = [
                     'page not found',
                     'not found',
@@ -1186,18 +1094,15 @@ class SocialModule(OSINTModule):
                     f'user "{username}" not found'
                 ]
 
-                # Si encontramos algún patrón de "no encontrado", el perfil no existe
                 for pattern in not_found_patterns:
                     if pattern in page_content:
                         return False
 
-                # Si llegamos aquí, probablemente existe
                 return True
 
             elif response.status_code == 404:
                 return False
 
-            # Para códigos 3xx (redirects), verificar si redirige a página de error
             elif 300 <= response.status_code < 400:
                 final_url = response.url
                 if 'error' in final_url.lower() or '404' in final_url:
@@ -1222,7 +1127,6 @@ class SocialModule(OSINTModule):
 
         email_id = email_result['id'] if email_result else None
 
-        # Preparar datos de redes sociales
         social_data = {}
         for platform, data in results['platforms'].items():
             if data['exists']:
