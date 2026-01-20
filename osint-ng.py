@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OSINT-NG - Framework profesional de Inteligencia de Fuentes Abiertas
-Autor: Rodrigo Lopez
+Autor: Nocturne
 Versión: 3.0.0
 Licencia: MIT
 """
@@ -62,7 +62,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class Config:
-    """Clase de configuración del framework"""
+    """Configuración"""
 
     def __init__(self):
         self.home_dir = os.path.expanduser("~")
@@ -1219,11 +1219,6 @@ class ModuleManager:
                 results[module_name] = {"error": "Módulo no encontrado"}
 
         return results
-
-
-# ============================================================================
-# INTERFAZ DE COMANDOS
-# ============================================================================
 
 class CommandHandler:
     """Manejador de comandos de línea de comandos"""
